@@ -21,6 +21,7 @@ impl Server {
     pub async fn run_server(&self, addr: &str) -> Result<()> {
         let server = TcpListener::bind(addr).await?;
         while let Some(stream) = server.incoming().next().await {
+            log::info!("new tunnel");
             let stream = stream?;
             let peers = Arc::downgrade(&self.peers);
             spawn_and_log_err(add_to_peer(peers, stream));
@@ -30,7 +31,7 @@ impl Server {
 }
 
 async fn add_to_peer(peers: Weak<Mutex<PeerGroup>>, stream: TcpStream) -> Result<()> {
-    let tunnel = Tunnel::new_from_tcp_stream(stream).await?;
+    let tunnel = Tunnel::server_side(stream).await?;
 
     let peers = match peers.upgrade() {
         Some(peers) => peers,

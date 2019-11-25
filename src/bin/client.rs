@@ -1,10 +1,10 @@
-use gkd::server::Server;
+use gkd::client::Client;
 use gkd::Result;
 
 #[async_std::main]
 async fn main() -> Result<()> {
     env_logger::init();
-    let server = Server::new();
-    server.run_server("127.0.0.1:9990").await?;
+    let _client = Client::new("127.0.0.1:9990", 4).await?;
+    loop {}
     Ok(())
 }

@@ -4,7 +4,7 @@ use async_std::io::{Read, Write};
 use async_std::net::TcpStream;
 use async_std::prelude::*;
 use async_std::sync::{Receiver, Sender};
-use byteorder::{BigEndian, ReadBytesExt};
+use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use futures::{FutureExt, StreamExt};
 use std::io::Cursor;
 use std::marker::Unpin;
@@ -15,7 +15,15 @@ pub struct Tunnel {
 }
 
 impl Tunnel {
-    pub async fn new_from_tcp_stream(mut stream: TcpStream) -> Result<Tunnel> {
+    pub async fn client_side(peer_id: u32, mut stream: TcpStream) -> Result<Tunnel> {
+        let mut buf = vec![0; 4];
+        buf.write_u32::<BigEndian>(peer_id);
+
+        stream.write_all(&buf).await?;
+        Ok(Tunnel { peer_id, stream })
+    }
+
+    pub async fn server_side(mut stream: TcpStream) -> Result<Tunnel> {
         let mut buf = vec![0; 4];
         stream.read_exact(&mut buf).await?;
 
