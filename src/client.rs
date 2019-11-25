@@ -5,7 +5,7 @@ use crate::tunnel::Tunnel;
 use crate::Result;
 use async_std::net::TcpStream;
 use async_std::net::ToSocketAddrs;
-use async_std::task;
+
 
 pub struct Client {
     peer: Peer,
@@ -30,7 +30,7 @@ impl Client {
         Ok(client)
     }
 
-    pub async fn connect<A: ToSocketAddrs>(addrs: A) -> Result<Connection> {
+    pub async fn connect<A: ToSocketAddrs>(_addrs: A) -> Result<Connection> {
         Ok(Connection {})
     }
 }

@@ -5,7 +5,7 @@ use crate::Result;
 use async_std::net::TcpListener;
 use async_std::net::TcpStream;
 use async_std::stream::StreamExt;
-use async_std::sync::{Arc, Mutex, MutexGuard, Weak};
+use async_std::sync::{Arc, Mutex, Weak};
 
 pub struct Server {
     peers: Arc<Mutex<PeerGroup>>,

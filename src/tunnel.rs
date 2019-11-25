@@ -32,7 +32,7 @@ impl Tunnel {
     }
 
     pub async fn run(
-        mut self,
+        self,
         inbound_sender: Sender<Packet>,
         outbound_receiver: Receiver<Packet>,
     ) -> Result<()> {
