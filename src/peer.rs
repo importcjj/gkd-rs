@@ -1,6 +1,6 @@
-use std::collections::HashMap;
-use async_std::sync::{channel, Sender, Receiver};
 use crate::packet::Packet;
+use async_std::sync::{channel, Receiver, Sender};
+use std::collections::HashMap;
 
 pub type PeerGroup = HashMap<u32, Peer>;
 

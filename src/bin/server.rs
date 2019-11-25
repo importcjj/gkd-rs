@@ -1,5 +1,5 @@
-use gkd::server::Server;
 use async_std::task;
+use gkd::server::Server;
 
 fn main() {
     let server = Server::new();

@@ -1,6 +1,6 @@
-use async_std::net::TcpStream;
-use async_std::sync::{channel, Sender, Receiver};
 use crate::packet::Packet;
+use async_std::net::TcpStream;
+use async_std::sync::{channel, Receiver, Sender};
 
 pub struct Connection {
     stream: TcpStream,
@@ -11,8 +11,6 @@ pub struct Connection {
 
 impl From<TcpStream> for Connection {
     fn from(stream: TcpStream) -> Self {
-        Self {
-            stream,
-        }
+        Self { stream }
     }
 }

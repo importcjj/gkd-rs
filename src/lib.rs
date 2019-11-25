@@ -1,13 +1,12 @@
 pub mod client;
-pub mod server;
 mod connection;
 mod packet;
 mod peer;
+pub mod server;
 mod tunnel;
 
 use async_std::future::Future;
 use async_std::task;
-
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
