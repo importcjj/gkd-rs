@@ -39,12 +39,16 @@ impl Packet {
             _ => unreachable!(),
         };
 
+        let data_length = Cursor::new(&header[9..13]).read_u32::<BigEndian>().unwrap();
+        let mut data = vec![0; data_length as usize];
+        reader.read_exact(&mut data).await?;
+
         Ok(Packet {
             kind: pakcet_kind,
             connection_id: Cursor::new(&header[1..5]).read_u32::<BigEndian>().unwrap(),
             packet_id: Cursor::new(&header[5..9]).read_u32::<BigEndian>().unwrap(),
-            data_length: Cursor::new(&header[9..13]).read_u32::<BigEndian>().unwrap(),
-            data: None,
+            data_length,
+            data: Some(data),
             cache: None,
         })
     }

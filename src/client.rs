@@ -6,7 +6,6 @@ use crate::Result;
 use async_std::net::TcpStream;
 use async_std::net::ToSocketAddrs;
 
-
 pub struct Client {
     peer: Peer,
 }
@@ -30,7 +29,9 @@ impl Client {
         Ok(client)
     }
 
-    pub async fn connect<A: ToSocketAddrs>(_addrs: A) -> Result<Connection> {
-        Ok(Connection {})
+    pub async fn connect<A: ToSocketAddrs>(&self, addr: A) -> Result<Connection> {
+        let inbound_sender = self.peer.inbound_sender.clone();
+        let outbound = self.peer.outbound.clone();
+        Connection::new(addr, inbound_sender, outbound).await
     }
 }
