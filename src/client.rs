@@ -30,8 +30,8 @@ impl Client {
     }
 
     pub async fn connect<A: ToSocketAddrs>(&self, addr: A) -> Result<Connection> {
-        let inbound_sender = self.peer.inbound_sender.clone();
-        let outbound = self.peer.outbound.clone();
-        Connection::new(addr, inbound_sender, outbound).await
+        let inbound = self.peer.inbound.clone();
+        let outbound_sender = self.peer.outbound_sender.clone();
+        Connection::new(addr, inbound, outbound_sender).await
     }
 }

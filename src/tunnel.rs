@@ -8,6 +8,7 @@ use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use futures::{FutureExt, StreamExt};
 use std::io::Cursor;
 use std::marker::Unpin;
+use log::debug;
 
 pub struct Tunnel {
     pub peer_id: u32,
@@ -16,7 +17,7 @@ pub struct Tunnel {
 
 impl Tunnel {
     pub async fn client_side(peer_id: u32, mut stream: TcpStream) -> Result<Tunnel> {
-        let mut buf = vec![0; 4];
+        let mut buf = vec![];
         buf.write_u32::<BigEndian>(peer_id);
 
         stream.write_all(&buf).await?;
@@ -24,7 +25,7 @@ impl Tunnel {
     }
 
     pub async fn server_side(mut stream: TcpStream) -> Result<Tunnel> {
-        let mut buf = vec![0; 4];
+        let mut buf = vec![0;4];
         stream.read_exact(&mut buf).await?;
 
         let peer_id = Cursor::new(buf).read_u32::<BigEndian>().unwrap();
@@ -63,7 +64,9 @@ async fn outbound<W: Write + Unpin + ?Sized>(
     mut outbound_receiver: Receiver<Packet>,
 ) -> Result<()> {
     while let Some(mut packet) = outbound_receiver.next().await {
+        debug!("outbound {:?}", packet);
         let bytes = packet.pack();
+        debug!("outboud data {:?}", bytes);
         writer.write_all(bytes).await?;
     }
     Ok(())

@@ -6,10 +6,10 @@ pub type PeerGroup = HashMap<u32, Peer>;
 
 pub struct Peer {
     peer_id: u32,
-    inbound: Receiver<Packet>,
+    pub inbound: Receiver<Packet>,
     pub inbound_sender: Sender<Packet>,
     pub outbound: Receiver<Packet>,
-    outbound_sender: Sender<Packet>,
+    pub outbound_sender: Sender<Packet>,
 }
 
 impl Peer {

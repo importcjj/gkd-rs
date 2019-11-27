@@ -7,17 +7,18 @@ use std::marker::Unpin;
 
 const PACKET_HEAD_SIZE: usize = 13;
 
+#[derive(Debug)]
 pub struct Packet {
-    kind: PacketKind,
-    connection_id: u32,
-    packet_id: u32,
-    data_length: u32,
-    data: Option<Vec<u8>>,
+    pub kind: PacketKind,
+    pub connection_id: u32,
+    pub packet_id: u32,
+    pub data_length: u32,
+    pub data: Option<Vec<u8>>,
     cache: Option<Vec<u8>>,
 }
 
 #[repr(u8)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum PacketKind {
     Connect = 1,
     Disconnect = 2,
@@ -60,7 +61,7 @@ impl Packet {
             return self.cache.as_ref().unwrap();
         }
 
-        let mut packed = vec![0; PACKET_HEAD_SIZE];
+        let mut packed = vec![];
         packed.push(self.kind as u8);
         packed.write_u32::<BigEndian>(self.connection_id);
         packed.write_u32::<BigEndian>(self.packet_id);
