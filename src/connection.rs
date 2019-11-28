@@ -1,44 +1,79 @@
 use crate::packet::{Packet, PacketKind};
 use crate::Result;
-use async_std::task;
 use async_std::future::Future;
 use async_std::io;
-use async_std::prelude::*;
-use async_std::io::{Write, Read};
+use async_std::io::{Read, Write};
 use async_std::net::TcpStream;
 use async_std::net::ToSocketAddrs;
 use async_std::pin::Pin;
+use async_std::prelude::*;
 use async_std::sync::{channel, Mutex, Receiver, Sender};
+use async_std::task;
 use async_std::task::{Context, Poll};
 use bytes::BufMut;
-use std::collections::HashMap;
+use futures::{select, FutureExt};
 use log::debug;
+use std::collections::HashMap;
 
 pub struct Connection {
-    connection_id: u32,
+    pub connection_id: u32,
     send_id: Mutex<u32>,
-    tunnel_sender: Sender<Packet>,
+    pub tunnel_sender: Sender<Packet>,
     ordered_recv: Receiver<Packet>,
 }
 
 impl Connection {
-    pub(crate) async fn new<A: ToSocketAddrs>(
-        dest: A,
+    async fn new(
+        connection_id: u32,
         tunnel_recv: Receiver<Packet>,
         tunnel_sender: Sender<Packet>,
     ) -> Result<Self> {
         let (ordered_sender, ordered_recv) = channel(100);
         let mut conn = Self {
-            connection_id: 0,
+            connection_id,
             send_id: Mutex::new(0),
             tunnel_sender,
             ordered_recv,
         };
 
         task::spawn(order_packets(tunnel_recv, ordered_sender));
+        Ok(conn)
+    }
+
+    pub(crate) async fn client_side<A: ToSocketAddrs>(
+        connection_id: u32,
+        dest: A,
+        tunnel_recv: Receiver<Packet>,
+        tunnel_sender: Sender<Packet>,
+    ) -> Result<Self> {
+        let conn = Connection::new(connection_id, tunnel_recv, tunnel_sender).await?;
         conn.send_connect(dest).await?;
 
         Ok(conn)
+    }
+
+    pub(crate) async fn server_side(
+        connection_id: u32,
+        tunnel_recv: Receiver<Packet>,
+        tunnel_sender: Sender<Packet>,
+    ) -> Result<Self> {
+        Connection::new(connection_id, tunnel_recv, tunnel_sender).await
+    }
+
+    pub(crate) async fn connect<A: ToSocketAddrs>(self, dest: A) -> Result<()> {
+        let target = TcpStream::connect(dest).await?;
+        let (lr, lw) = &mut (&self, &self);
+        let (tr, tw) = &mut (&target, &target);
+
+        let copy_a = io::copy(lr, tw);
+        let copy_b = io::copy(tr, lw);
+
+        let _ = select! {
+            r1 = copy_a.fuse() => r1?,
+            r2 = copy_b.fuse() => r2?
+        };
+
+        Ok(())
     }
 
     async fn send_connect<A: ToSocketAddrs>(&self, dest: A) -> Result<()> {
@@ -69,27 +104,25 @@ impl Connection {
 
     async fn recv_data(&self) -> Result<Option<Packet>> {
         let packet = self.ordered_recv.recv().await;
-        debug!("inbound {:?}", packet);
+        // debug!("inbound {:?}", packet);
         Ok(packet)
     }
-
-    
 }
 
 async fn order_packets(inbound: Receiver<Packet>, ordered: Sender<Packet>) -> Result<()> {
     let mut recv_id = 0u32;
     let mut packets_caches = HashMap::<u32, Packet>::new();
     while let Some(packet) = inbound.recv().await {
-        println!("!!!!!order");
+        debug!("{} come in, {} expected", packet.packet_id, recv_id);
         if packet.packet_id == recv_id {
             ordered.send(packet).await;
             recv_id += 1;
 
             while let Some(packet) = packets_caches.remove(&recv_id) {
+                debug!("{} in cache", packet.packet_id);
                 ordered.send(packet).await;
                 recv_id += 1;
-            } 
-            
+            }
         } else {
             packets_caches.insert(packet.packet_id, packet);
         }

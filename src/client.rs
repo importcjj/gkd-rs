@@ -13,25 +13,20 @@ pub struct Client {
 impl Client {
     pub async fn new<A: ToSocketAddrs>(remote: A, tunnel_num: u32) -> Result<Self> {
         let peer_id = 0;
-        let client = Client {
-            peer: Peer::new(peer_id),
-        };
-
+        let peer = Peer::client_side(peer_id);
         for _i in 0..tunnel_num {
             let stream = TcpStream::connect(&remote).await?;
             let tunnel = Tunnel::client_side(peer_id, stream).await?;
 
-            let inbound_sender = client.peer.inbound_sender.clone();
-            let outbound = client.peer.outbound.clone();
+            let inbound_sender = peer.inbound_sender.clone();
+            let outbound = peer.outbound.clone();
             spawn_and_log_err(tunnel.run(inbound_sender, outbound));
         }
 
-        Ok(client)
+        Ok(Client { peer })
     }
 
     pub async fn connect<A: ToSocketAddrs>(&self, addr: A) -> Result<Connection> {
-        let inbound = self.peer.inbound.clone();
-        let outbound_sender = self.peer.outbound_sender.clone();
-        Connection::new(addr, inbound, outbound_sender).await
+        self.peer.new_client_side_connection(addr).await
     }
 }

@@ -18,7 +18,7 @@ pub struct Packet {
 }
 
 #[repr(u8)]
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum PacketKind {
     Connect = 1,
     Disconnect = 2,
