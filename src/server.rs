@@ -33,17 +33,17 @@ impl Server {
 async fn add_to_peer(peers: Weak<Mutex<PeerGroup>>, stream: TcpStream) -> Result<()> {
     let tunnel = Tunnel::server_side(stream).await?;
 
-    let peers = match peers.upgrade() {
+    let xpeers = match peers.upgrade() {
         Some(peers) => peers,
         None => return Ok(()),
     };
 
-    let mut peers = peers.lock().await;
+    let mut xpeers = xpeers.lock().await;
     let peer_id = tunnel.peer_id;
-    let peer = peers.entry(peer_id).or_insert(Peer::server_side(peer_id));
+    let peer = xpeers.entry(peer_id).or_insert(Peer::server_side(peer_id));
 
     let inbound_sender = peer.inbound_sender.clone();
     let outbound = peer.outbound.clone();
-    spawn_and_log_err(tunnel.run(inbound_sender, outbound));
+    spawn_and_log_err(tunnel.run_with_peer(peers, inbound_sender, outbound));
     Ok(())
 }

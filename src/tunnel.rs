@@ -1,15 +1,16 @@
 use crate::packet::Packet;
+use crate::peer::PeerGroup;
 use crate::Result;
 use async_std::io::{Read, Write};
 use async_std::net::TcpStream;
 use async_std::prelude::*;
+use async_std::sync::{Mutex, Weak};
 use async_std::sync::{Receiver, Sender};
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use futures::{FutureExt, StreamExt};
 use log::debug;
 use std::io::Cursor;
 use std::marker::Unpin;
-
 pub struct Tunnel {
     pub peer_id: u32,
     stream: TcpStream,
@@ -18,7 +19,7 @@ pub struct Tunnel {
 impl Tunnel {
     pub async fn client_side(peer_id: u32, mut stream: TcpStream) -> Result<Tunnel> {
         let mut buf = vec![];
-        buf.write_u32::<BigEndian>(peer_id);
+        buf.write_u32::<BigEndian>(peer_id)?;
 
         stream.write_all(&buf).await?;
         Ok(Tunnel { peer_id, stream })
@@ -46,6 +47,25 @@ impl Tunnel {
 
         Ok(())
     }
+
+    pub async fn run_with_peer(
+        self,
+        peers: Weak<Mutex<PeerGroup>>,
+        inbound_sender: Sender<Packet>,
+        outbound_receiver: Receiver<Packet>,
+    ) -> Result<()> {
+        let peer_id = self.peer_id;
+        let r = self.run(inbound_sender, outbound_receiver).await;
+        let peers = match peers.upgrade() {
+            Some(peers) => peers,
+            None => return Ok(()),
+        };
+        let mut peers = peers.lock().await;
+        if peers.remove(&peer_id).is_some() {
+            debug!("peer {} removed", peer_id);
+        }
+        r
+    }
 }
 
 async fn inbound<R: Read + Unpin + ?Sized>(
@@ -54,6 +74,7 @@ async fn inbound<R: Read + Unpin + ?Sized>(
 ) -> Result<()> {
     loop {
         let packet = Packet::from_reader(reader).await?;
+        debug!("new packet");
         inbound_sender.send(packet).await;
     }
     Ok(())
@@ -66,7 +87,6 @@ async fn outbound<W: Write + Unpin + ?Sized>(
     while let Some(mut packet) = outbound_receiver.next().await {
         debug!("outbound {:?}", packet);
         let bytes = packet.pack();
-        // debug!("outboud data {:?}", bytes);
         writer.write_all(bytes).await?;
     }
     Ok(())

@@ -74,13 +74,15 @@ async fn peer_loop_client_side(
     dispath: Arc<Mutex<HashMap<u32, Sender<Packet>>>>,
 ) -> Result<()> {
     while let Some(packet) = inbound.recv().await {
-        let mut dispatch_guard = dispath.lock().await;
+        debug!("client recv new packet {:?}", packet);
+        let dispatch_guard = dispath.lock().await;
 
         match dispatch_guard.get(&packet.connection_id) {
             Some(ref sender) => {
+                debug!("send to channel");
                 sender.send(packet).await;
             }
-            None => (),
+            None => debug!("nothing to do"),
         }
         drop(dispatch_guard);
     }
@@ -92,39 +94,30 @@ async fn peer_loop_server_side(
     inbound: Receiver<Packet>,
     outbound_sender: Sender<Packet>,
 ) -> Result<()> {
-    let mut connections: HashMap<u32, Connection> = HashMap::new();
     let mut dispatch: HashMap<u32, Sender<Packet>> = HashMap::new();
 
     while let Some(packet) = inbound.recv().await {
-        debug!("new packet {:?}", packet);
+        debug!("server recv new packet {:?}", packet);
         match dispatch.get(&packet.connection_id) {
             Some(ref sender) => {
-                if packet.kind == PacketKind::Connect {
-                    let conn = connections
-                        .remove(&packet.connection_id)
-                        .expect("pop connection");
-                    let data = packet.data.as_ref().unwrap();
-                    let addr = String::from_utf8_lossy(data).to_string();
-                    debug!("connection to {}", addr);
-                    spawn_and_log_err(conn.connect(addr));
-                }
                 sender.send(packet).await;
             }
             None => {
                 debug!("make new connection");
                 let (send_to_conn, conn_recv) = channel(100);
-                let conn = Connection::server_side(
+                spawn_and_log_err(Connection::serve(
                     packet.connection_id,
                     conn_recv,
                     outbound_sender.clone(),
-                )
-                .await?;
+                ));
+
+                let connection_id = packet.connection_id;
                 send_to_conn.send(packet).await;
-                dispatch.insert(conn.connection_id, send_to_conn);
-                connections.insert(conn.connection_id, conn);
+                dispatch.insert(connection_id, send_to_conn);
             }
         }
     }
 
+    debug!("peer_loop_server_side finished");
     Ok(())
 }

@@ -1,4 +1,5 @@
 use crate::packet::{Packet, PacketKind};
+use crate::spawn_and_log_err;
 use crate::Result;
 use async_std::future::Future;
 use async_std::io;
@@ -13,6 +14,7 @@ use async_std::task::{Context, Poll};
 use bytes::BufMut;
 use futures::{select, FutureExt};
 use log::debug;
+use std::cmp;
 use std::collections::HashMap;
 
 pub struct Connection {
@@ -23,21 +25,19 @@ pub struct Connection {
 }
 
 impl Connection {
-    async fn new(
+    fn new(
         connection_id: u32,
         tunnel_recv: Receiver<Packet>,
         tunnel_sender: Sender<Packet>,
-    ) -> Result<Self> {
+    ) -> Self {
         let (ordered_sender, ordered_recv) = channel(100);
-        let mut conn = Self {
+        task::spawn(order_packets(tunnel_recv, ordered_sender));
+        Self {
             connection_id,
             send_id: Mutex::new(0),
             tunnel_sender,
             ordered_recv,
-        };
-
-        task::spawn(order_packets(tunnel_recv, ordered_sender));
-        Ok(conn)
+        }
     }
 
     pub(crate) async fn client_side<A: ToSocketAddrs>(
@@ -46,18 +46,28 @@ impl Connection {
         tunnel_recv: Receiver<Packet>,
         tunnel_sender: Sender<Packet>,
     ) -> Result<Self> {
-        let conn = Connection::new(connection_id, tunnel_recv, tunnel_sender).await?;
+        let conn = Connection::new(connection_id, tunnel_recv, tunnel_sender);
         conn.send_connect(dest).await?;
 
         Ok(conn)
     }
 
-    pub(crate) async fn server_side(
+    pub(crate) async fn serve(
         connection_id: u32,
         tunnel_recv: Receiver<Packet>,
         tunnel_sender: Sender<Packet>,
-    ) -> Result<Self> {
-        Connection::new(connection_id, tunnel_recv, tunnel_sender).await
+    ) -> Result<()> {
+        let conn = Connection::new(connection_id, tunnel_recv, tunnel_sender);
+        while let Some(packet) = conn.ordered_recv.recv().await {
+            if packet.kind == PacketKind::Connect {
+                let data = packet.data.as_ref().unwrap();
+                let addr = String::from_utf8_lossy(data).to_string();
+                debug!("connection to {}", addr);
+                return conn.connect(addr).await;
+            }
+        }
+
+        Ok(())
     }
 
     pub(crate) async fn connect<A: ToSocketAddrs>(self, dest: A) -> Result<()> {
@@ -73,6 +83,8 @@ impl Connection {
             r2 = copy_b.fuse() => r2?
         };
 
+        self.send_disconnect().await?;
+
         Ok(())
     }
 
@@ -87,6 +99,7 @@ impl Connection {
     }
 
     async fn send_data(&self, buf: Vec<u8>) -> Result<()> {
+        debug!("send data {:?}", buf);
         let mut send_id = self.send_id.lock().await;
         let data = Packet::new_data(*send_id, self.connection_id, buf);
         *send_id += 1;
@@ -103,8 +116,9 @@ impl Connection {
     }
 
     async fn recv_data(&self) -> Result<Option<Packet>> {
+        debug!("read from ordered");
         let packet = self.ordered_recv.recv().await;
-        // debug!("inbound {:?}", packet);
+        debug!("inbound {:?}", packet);
         Ok(packet)
     }
 }
@@ -116,6 +130,7 @@ async fn order_packets(inbound: Receiver<Packet>, ordered: Sender<Packet>) -> Re
         debug!("{} come in, {} expected", packet.packet_id, recv_id);
         if packet.packet_id == recv_id {
             ordered.send(packet).await;
+            debug!("send ok");
             recv_id += 1;
 
             while let Some(packet) = packets_caches.remove(&recv_id) {
@@ -147,13 +162,19 @@ impl Read for &Connection {
         mut buf: &mut [u8],
     ) -> Poll<io::Result<usize>> {
         let mut recv_fut = Box::pin(self.recv_data());
-        match recv_fut.as_mut().poll(cx) {
+        let r = recv_fut.as_mut().poll(cx);
+        debug!("read {:?}", r);
+
+        match r {
             Poll::Ready(Ok(Some(packet))) => match packet.kind {
                 PacketKind::Connect => Poll::Ready(Ok(0)),
                 PacketKind::Data => {
                     let data = packet.data.unwrap();
-                    buf.put(&data[..]);
-                    Poll::Ready(Ok(data.len()))
+                    debug!("poll read size {:?}", data.len());
+                    let max = cmp::min(buf.len(), data.len());
+                    debug!("target buf size: {}", max);
+                    buf.put(&data[..max]);
+                    Poll::Ready(Ok(max))
                 }
                 PacketKind::Disconnect => Poll::Ready(Ok(0)),
             },
@@ -180,6 +201,7 @@ impl Write for Connection {
 
 impl io::Write for &Connection {
     fn poll_write(self: Pin<&mut Self>, cx: &mut Context, buf: &[u8]) -> Poll<io::Result<usize>> {
+        debug!("write");
         let mut send_fut = Box::pin(self.send_data(buf.to_vec()));
         match send_fut.as_mut().poll(cx) {
             Poll::Ready(Ok(_)) => Poll::Ready(Ok(buf.len())),
