@@ -1,5 +1,5 @@
 pub mod client;
-mod connection;
+pub mod connection;
 mod packet;
 mod peer;
 pub mod server;

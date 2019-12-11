@@ -73,7 +73,7 @@ async fn peer_loop_client_side(
     dispath: Arc<Mutex<HashMap<u32, Sender<Packet>>>>,
 ) -> Result<()> {
     while let Some(packet) = inbound.recv().await {
-        debug!("client recv new packet {:?}", packet);
+        debug!("client recv new {} - {}", packet.connection_id, packet.packet_id);
         let dispatch_guard = dispath.lock().await;
 
         match dispatch_guard.get(&packet.connection_id) {
@@ -96,7 +96,7 @@ async fn peer_loop_server_side(
     let mut dispatch: HashMap<u32, Sender<Packet>> = HashMap::new();
 
     while let Some(packet) = inbound.recv().await {
-        debug!("server recv new packet {:?}", packet);
+        debug!("server recv new {} - {}", packet.connection_id, packet.packet_id);
         match dispatch.get(&packet.connection_id) {
             Some(ref sender) => {
                 sender.send(packet).await;

@@ -115,7 +115,7 @@ impl Connection {
     }
 
     async fn send_data(&self, buf: Vec<u8>) -> Result<()> {
-        debug!("send data {:?}", buf);
+        debug!("send data");
         let mut send_id = self.send_id.lock().await;
         let data = Packet::new_data(*send_id, self.connection_id, buf);
         *send_id += 1;
@@ -150,7 +150,7 @@ async fn order_packets(inbound: Receiver<Packet>, ordered: Sender<Packet>) -> Re
             recv_id += 1;
 
             while let Some(packet) = packets_caches.remove(&recv_id) {
-                debug!("{} in cache", packet.packet_id);
+                debug!("{} - {} in cache", packet.connection_id, packet.packet_id);
                 ordered.send(packet).await;
                 recv_id += 1;
             }
@@ -190,7 +190,7 @@ impl Read for &Connection {
 
         let r = Pin::new(&mut inner.receiver).poll_next(cx);
 
-        debug!("read {:?}", r);
+        // debug!("read {:?}", r);
 
         match r {
             Poll::Ready(Some(packet)) => match packet.kind {
