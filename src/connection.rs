@@ -16,12 +16,15 @@ use futures::{select, FutureExt};
 use log::debug;
 use std::cmp;
 use std::collections::HashMap;
+use std::sync::Mutex as SyncMutex;
+// use std::cell::RefCell;
 
 pub struct Connection {
     pub connection_id: u32,
     send_id: Mutex<u32>,
     pub tunnel_sender: Sender<Packet>,
     ordered_recv: Receiver<Packet>,
+    receiver: SyncMutex<Receiver<Packet>>,
 }
 
 impl Connection {
@@ -36,7 +39,9 @@ impl Connection {
             connection_id,
             send_id: Mutex::new(0),
             tunnel_sender,
-            ordered_recv,
+
+            receiver: SyncMutex::new(ordered_recv.clone()),
+            ordered_recv: ordered_recv,
         }
     }
 
@@ -161,12 +166,14 @@ impl Read for &Connection {
         cx: &mut Context,
         mut buf: &mut [u8],
     ) -> Poll<io::Result<usize>> {
-        let mut recv_fut = Box::pin(self.recv_data());
-        let r = recv_fut.as_mut().poll(cx);
+
+        let mut recv = self.receiver.lock().unwrap();
+        let r = Pin::new(&mut *recv).poll_next(cx);
+
         debug!("read {:?}", r);
 
         match r {
-            Poll::Ready(Ok(Some(packet))) => match packet.kind {
+            Poll::Ready(Some(packet)) => match packet.kind {
                 PacketKind::Connect => Poll::Ready(Ok(0)),
                 PacketKind::Data => {
                     let data = packet.data.unwrap();
@@ -178,9 +185,8 @@ impl Read for &Connection {
                 }
                 PacketKind::Disconnect => Poll::Ready(Ok(0)),
             },
-            Poll::Ready(Ok(None)) => Poll::Ready(Ok(0)),
+            Poll::Ready(None) => Poll::Ready(Ok(0)),
             Poll::Pending => Poll::Pending,
-            Poll::Ready(Err(e)) => panic!("poll read error {:?}", e),
         }
     }
 }

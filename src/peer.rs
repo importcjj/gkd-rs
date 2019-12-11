@@ -1,8 +1,7 @@
 use crate::connection::Connection;
-use crate::packet::{Packet, PacketKind};
+use crate::packet::Packet;
 use crate::spawn_and_log_err;
 use crate::Result;
-use async_std::net::TcpStream;
 use async_std::net::ToSocketAddrs;
 use async_std::sync::{channel, Mutex, Receiver, Sender};
 use log::debug;
