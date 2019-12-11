@@ -24,7 +24,12 @@ pub struct Connection {
     send_id: Mutex<u32>,
     pub tunnel_sender: Sender<Packet>,
     ordered_recv: Receiver<Packet>,
-    receiver: SyncMutex<Receiver<Packet>>,
+    inner: SyncMutex<ConnectionInner>,
+}
+
+pub struct ConnectionInner {
+    receiver: Receiver<Packet>,
+    buf: bytes::BytesMut,
 }
 
 impl Connection {
@@ -35,12 +40,18 @@ impl Connection {
     ) -> Self {
         let (ordered_sender, ordered_recv) = channel(100);
         task::spawn(order_packets(tunnel_recv, ordered_sender));
+
+        let inner = ConnectionInner {
+            receiver: ordered_recv.clone(),
+            buf: bytes::BytesMut::new(),
+        };
+
         Self {
             connection_id,
             send_id: Mutex::new(0),
             tunnel_sender,
 
-            receiver: SyncMutex::new(ordered_recv.clone()),
+            inner: SyncMutex::new(inner),
             ordered_recv: ordered_recv,
         }
     }
@@ -166,9 +177,18 @@ impl Read for &Connection {
         cx: &mut Context,
         mut buf: &mut [u8],
     ) -> Poll<io::Result<usize>> {
+        let mut inner = self.inner.lock().unwrap();
 
-        let mut recv = self.receiver.lock().unwrap();
-        let r = Pin::new(&mut *recv).poll_next(cx);
+        if !inner.buf.is_empty() {
+            let expected = buf.len();
+            let remain = inner.buf.len();
+            let split_at = cmp::min(expected, remain);
+            let data = inner.buf.split_to(split_at);
+            buf.put(data);
+            return Poll::Ready(Ok(split_at));
+        }
+
+        let r = Pin::new(&mut inner.receiver).poll_next(cx);
 
         debug!("read {:?}", r);
 
@@ -178,10 +198,13 @@ impl Read for &Connection {
                 PacketKind::Data => {
                     let data = packet.data.unwrap();
                     debug!("poll read size {:?}", data.len());
-                    let max = cmp::min(buf.len(), data.len());
-                    debug!("target buf size: {}", max);
-                    buf.put(&data[..max]);
-                    Poll::Ready(Ok(max))
+                    let min = cmp::min(buf.len(), data.len());
+                    debug!("target buf size: {}", min);
+                    inner.buf.extend_from_slice(&data);
+
+                    let data = inner.buf.split_to(min);
+                    buf.put(data);
+                    return Poll::Ready(Ok(min));
                 }
                 PacketKind::Disconnect => Poll::Ready(Ok(0)),
             },
