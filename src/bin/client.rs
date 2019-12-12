@@ -4,7 +4,7 @@ use gkd::Result;
 #[async_std::main]
 async fn main() -> Result<()> {
     env_logger::init();
-    let client = Client::new("103.126.101.87:9990", 2).await?;
+    let client = Client::new("217.0.0.1:9990", 2).await?;
     let mut conn = client.connect("127.0.0.1:5555").await?;
 
     for i in 1..10u8 {
