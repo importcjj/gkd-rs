@@ -1,7 +1,7 @@
 use async_std::prelude::*;
 use gkd::Client;
 use gkd::Result;
-#[async_std::main]
+#[tokio::main]
 async fn main() -> Result<()> {
     env_logger::init();
     let tunnel_num = 4;
