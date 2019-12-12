@@ -8,7 +8,8 @@ mod tunnel;
 use async_std::future::Future;
 use async_std::task;
 
-pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
+// pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
+pub type Result<T> = async_std::io::Result<T>;
 
 fn spawn_and_log_err<F>(fut: F) -> task::JoinHandle<()>
 where

@@ -2,7 +2,7 @@ use crate::connection::Connection;
 use crate::packet::Packet;
 use crate::spawn_and_log_err;
 use crate::Result;
-use async_std::net::ToSocketAddrs;
+use async_std::net::{SocketAddr, ToSocketAddrs};
 use async_std::sync::{channel, Mutex, Receiver, Sender};
 use log::debug;
 use std::collections::HashMap;
@@ -44,11 +44,11 @@ impl Peer {
         peer
     }
 
-    pub fn server_side(peer_id: u32) -> Self {
+    pub fn server_side(peer_id: u32, to_incomings: Sender<(Connection, SocketAddr)>) -> Self {
         let peer = Peer::new(peer_id);
         let inbound = peer.inbound.clone();
         let outbound = peer.outbound_sender.clone();
-        spawn_and_log_err(peer_loop_server_side(inbound, outbound));
+        spawn_and_log_err(peer_loop_server_side(inbound, outbound, to_incomings));
         peer
     }
 
@@ -104,6 +104,7 @@ async fn peer_loop_client_side(
 async fn peer_loop_server_side(
     inbound: Receiver<Packet>,
     outbound_sender: Sender<Packet>,
+    to_incomings: Sender<(Connection, SocketAddr)>,
 ) -> Result<()> {
     let mut dispatch: HashMap<u32, Sender<Packet>> = HashMap::new();
 
@@ -124,10 +125,11 @@ async fn peer_loop_server_side(
             None => {
                 debug!("make new connection");
                 let (send_to_conn, conn_recv) = channel(1024);
-                spawn_and_log_err(Connection::serve(
+                spawn_and_log_err(Connection::wait_connect_packet(
                     packet.connection_id,
                     conn_recv,
                     outbound_sender.clone(),
+                    to_incomings.clone(),
                 ));
 
                 let connection_id = packet.connection_id;

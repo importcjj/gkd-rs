@@ -1,14 +1,15 @@
 use crate::packet::{Packet, PacketKind};
-use crate::spawn_and_log_err;
 use crate::Result;
 use async_std::future::Future;
+use crate::spawn_and_log_err;
 use async_std::io;
 use async_std::io::{Read, Write};
+use async_std::net::SocketAddr;
 use async_std::net::TcpStream;
 use async_std::net::ToSocketAddrs;
 use async_std::pin::Pin;
 use async_std::prelude::*;
-use async_std::sync::{channel, Mutex, Receiver, Sender};
+use async_std::sync::{channel, Receiver, Sender};
 use async_std::task;
 use async_std::task::{Context, Poll};
 use bytes::BufMut;
@@ -71,18 +72,23 @@ impl Connection {
         Ok(conn)
     }
 
-    pub(crate) async fn serve(
+    pub(crate) async fn wait_connect_packet(
         connection_id: u32,
         tunnel_recv: Receiver<Packet>,
         tunnel_sender: Sender<Packet>,
+        to_incomings: Sender<(Connection, SocketAddr)>,
     ) -> Result<()> {
         let conn = Connection::new(connection_id, tunnel_recv, tunnel_sender);
         while let Some(packet) = conn.ordered_recv.recv().await {
             if packet.kind == PacketKind::Connect {
                 let data = packet.data.as_ref().unwrap();
-                let addr = String::from_utf8_lossy(data).to_string();
+                // FIXME
+                let s = std::str::from_utf8(data).unwrap();
+                let addr = s.to_socket_addrs().await?.next().unwrap();
+
+                to_incomings.send((conn, addr.into())).await;
                 debug!("connection to {}", addr);
-                return conn.connect(addr).await;
+                break;
             }
         }
 
@@ -102,7 +108,6 @@ impl Connection {
             r2 = copy_b.fuse() => r2?
         };
 
-        self.send_disconnect().await?;
 
         Ok(())
     }
@@ -124,12 +129,6 @@ impl Connection {
         Ok(())
     }
 
-    async fn send_disconnect(&self) -> Result<()> {
-        let send_id = self.sender_id.fetch_add(1, Ordering::Relaxed);
-        let disconnect = Packet::new_disconnect(send_id, self.connection_id);
-        self.sender.send(disconnect).await;
-        Ok(())
-    }
 }
 
 async fn order_packets(inbound: Receiver<Packet>, ordered: Sender<Packet>) -> Result<()> {
@@ -151,6 +150,18 @@ async fn order_packets(inbound: Receiver<Packet>, ordered: Sender<Packet>) -> Re
         }
     }
     Ok(())
+}
+
+impl Drop for Connection {
+    fn drop(&mut self) {
+        let send_id = self.sender_id.fetch_add(1, Ordering::Relaxed);
+        let disconnect = Packet::new_disconnect(send_id, self.connection_id);
+        let sender = self.sender.clone();
+        spawn_and_log_err(async move {
+            sender.send(disconnect).await;
+            Ok(())
+        });
+    }
 }
 
 impl Read for Connection {

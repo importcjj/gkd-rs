@@ -1,5 +1,5 @@
 use crate::packet::Packet;
-use crate::peer::PeerGroup;
+use crate::server::Shares;
 use crate::Result;
 use async_std::io::{Read, Write};
 use async_std::net::TcpStream;
@@ -48,20 +48,20 @@ impl Tunnel {
         Ok(())
     }
 
-    pub async fn run_with_peer(
+    pub async fn run_with_shares(
         self,
-        peers: Weak<Mutex<PeerGroup>>,
+        shares: Weak<Mutex<Shares>>,
         inbound_sender: Sender<Packet>,
         outbound_receiver: Receiver<Packet>,
     ) -> Result<()> {
         let peer_id = self.peer_id;
         let r = self.run(inbound_sender, outbound_receiver).await;
-        let peers = match peers.upgrade() {
-            Some(peers) => peers,
+        let shares = match shares.upgrade() {
+            Some(shares) => shares,
             None => return Ok(()),
         };
-        let mut peers = peers.lock().await;
-        if peers.remove(&peer_id).is_some() {
+        let mut shares_guard = shares.lock().await;
+        if shares_guard.peers.remove(&peer_id).is_some() {
             debug!("peer {} removed", peer_id);
         }
         r
