@@ -77,7 +77,6 @@ async fn inbound<R: Read + Unpin + ?Sized>(
         debug!("new packet {} - {}", packet.connection_id, packet.packet_id);
         inbound_sender.send(packet).await;
     }
-    Ok(())
 }
 
 async fn outbound<W: Write + Unpin + ?Sized>(

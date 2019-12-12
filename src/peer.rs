@@ -24,8 +24,8 @@ pub struct Peer {
 
 impl Peer {
     pub fn new(peer_id: u32) -> Self {
-        let (inbound_sender, inbound) = channel(100);
-        let (outbound_sender, outbound) = channel(100);
+        let (inbound_sender, inbound) = channel(1024);
+        let (outbound_sender, outbound) = channel(1024);
         Peer {
             peer_id,
             inbound,
@@ -56,8 +56,9 @@ impl Peer {
         &self,
         dest: A,
     ) -> Result<Connection> {
-        let (send_to_conn, conn_recv) = channel(100);
+        let (send_to_conn, conn_recv) = channel(1024);
         let id = CONNECTION_ID.fetch_add(1, Ordering::Relaxed);
+        debug!("make new connection {:?}", id);
 
         let conn =
             Connection::client_side(id, dest, conn_recv, self.outbound_sender.clone()).await?;
@@ -73,13 +74,24 @@ async fn peer_loop_client_side(
     dispath: Arc<Mutex<HashMap<u32, Sender<Packet>>>>,
 ) -> Result<()> {
     while let Some(packet) = inbound.recv().await {
-        debug!("client recv new {} - {}", packet.connection_id, packet.packet_id);
+        debug!(
+            "client recv new {} - {}",
+            packet.connection_id, packet.packet_id
+        );
+        debug!("try to lock the dispatch");
         let dispatch_guard = dispath.lock().await;
+        debug!("dispatch locked");
 
         match dispatch_guard.get(&packet.connection_id) {
             Some(ref sender) => {
                 debug!("send to channel");
-                sender.send(packet).await;
+                // FIXME: should not drop the packet
+                if !sender.is_full() {
+                    sender.send(packet).await;
+                    debug!("sended to channel");
+                } else {
+                    debug!("packet dropped");
+                }
             }
             None => debug!("nothing to do"),
         }
@@ -96,14 +108,17 @@ async fn peer_loop_server_side(
     let mut dispatch: HashMap<u32, Sender<Packet>> = HashMap::new();
 
     while let Some(packet) = inbound.recv().await {
-        debug!("server recv new {} - {}", packet.connection_id, packet.packet_id);
+        debug!(
+            "server recv new {} - {}",
+            packet.connection_id, packet.packet_id
+        );
         match dispatch.get(&packet.connection_id) {
             Some(ref sender) => {
                 sender.send(packet).await;
             }
             None => {
                 debug!("make new connection");
-                let (send_to_conn, conn_recv) = channel(100);
+                let (send_to_conn, conn_recv) = channel(1024);
                 spawn_and_log_err(Connection::serve(
                     packet.connection_id,
                     conn_recv,

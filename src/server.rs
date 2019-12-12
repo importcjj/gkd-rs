@@ -40,7 +40,9 @@ async fn add_to_peer(peers: Weak<Mutex<PeerGroup>>, stream: TcpStream) -> Result
 
     let mut xpeers = xpeers.lock().await;
     let peer_id = tunnel.peer_id;
-    let peer = xpeers.entry(peer_id).or_insert(Peer::server_side(peer_id));
+    let peer = xpeers
+        .entry(peer_id)
+        .or_insert_with(|| Peer::server_side(peer_id));
 
     let inbound_sender = peer.inbound_sender.clone();
     let outbound = peer.outbound.clone();

@@ -16,18 +16,20 @@ use futures::{select, FutureExt};
 use log::debug;
 use std::cmp;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex as SyncMutex;
-// use std::cell::RefCell;
 
 pub struct Connection {
     pub connection_id: u32,
-    send_id: Mutex<u32>,
-    pub tunnel_sender: Sender<Packet>,
+
     ordered_recv: Receiver<Packet>,
-    inner: SyncMutex<ConnectionInner>,
+    recv_inner: SyncMutex<RecvInner>,
+
+    sender_id: AtomicU32,
+    sender: Sender<Packet>,
 }
 
-pub struct ConnectionInner {
+pub struct RecvInner {
     receiver: Receiver<Packet>,
     buf: bytes::BytesMut,
 }
@@ -41,18 +43,19 @@ impl Connection {
         let (ordered_sender, ordered_recv) = channel(100);
         task::spawn(order_packets(tunnel_recv, ordered_sender));
 
-        let inner = ConnectionInner {
+        let recv_inner = RecvInner {
             receiver: ordered_recv.clone(),
             buf: bytes::BytesMut::new(),
         };
 
         Self {
             connection_id,
-            send_id: Mutex::new(0),
-            tunnel_sender,
 
-            inner: SyncMutex::new(inner),
             ordered_recv: ordered_recv,
+            recv_inner: SyncMutex::new(recv_inner),
+
+            sender: tunnel_sender,
+            sender_id: AtomicU32::new(0),
         }
     }
 
@@ -107,35 +110,25 @@ impl Connection {
     async fn send_connect<A: ToSocketAddrs>(&self, dest: A) -> Result<()> {
         let addr = dest.to_socket_addrs().await?.next().unwrap();
         let address = format!("{}", addr);
-        let mut send_id = self.send_id.lock().await;
-        let connect = Packet::new_connect(*send_id, self.connection_id, &address);
-        *send_id += 1;
-        self.tunnel_sender.send(connect).await;
+        let send_id = self.sender_id.fetch_add(1, Ordering::Relaxed);
+        let connect = Packet::new_connect(send_id, self.connection_id, &address);
+
+        self.sender.send(connect).await;
         Ok(())
     }
 
     async fn send_data(&self, buf: Vec<u8>) -> Result<()> {
-        debug!("send data");
-        let mut send_id = self.send_id.lock().await;
-        let data = Packet::new_data(*send_id, self.connection_id, buf);
-        *send_id += 1;
-        self.tunnel_sender.send(data).await;
+        let send_id = self.sender_id.fetch_add(1, Ordering::Relaxed);
+        let data = Packet::new_data(send_id, self.connection_id, buf);
+        self.sender.send(data).await;
         Ok(())
     }
 
     async fn send_disconnect(&self) -> Result<()> {
-        let mut send_id = self.send_id.lock().await;
-        let disconnect = Packet::new_disconnect(*send_id, self.connection_id);
-        *send_id += 1;
-        self.tunnel_sender.send(disconnect).await;
+        let send_id = self.sender_id.fetch_add(1, Ordering::Relaxed);
+        let disconnect = Packet::new_disconnect(send_id, self.connection_id);
+        self.sender.send(disconnect).await;
         Ok(())
-    }
-
-    async fn recv_data(&self) -> Result<Option<Packet>> {
-        debug!("read from ordered");
-        let packet = self.ordered_recv.recv().await;
-        debug!("inbound {:?}", packet);
-        Ok(packet)
     }
 }
 
@@ -146,7 +139,6 @@ async fn order_packets(inbound: Receiver<Packet>, ordered: Sender<Packet>) -> Re
         debug!("{} come in, {} expected", packet.packet_id, recv_id);
         if packet.packet_id == recv_id {
             ordered.send(packet).await;
-            debug!("send ok");
             recv_id += 1;
 
             while let Some(packet) = packets_caches.remove(&recv_id) {
@@ -177,7 +169,7 @@ impl Read for &Connection {
         cx: &mut Context,
         mut buf: &mut [u8],
     ) -> Poll<io::Result<usize>> {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.recv_inner.lock().unwrap();
 
         if !inner.buf.is_empty() {
             let expected = buf.len();
@@ -199,7 +191,6 @@ impl Read for &Connection {
                     let data = packet.data.unwrap();
                     debug!("poll read size {:?}", data.len());
                     let min = cmp::min(buf.len(), data.len());
-                    debug!("target buf size: {}", min);
                     inner.buf.extend_from_slice(&data);
 
                     let data = inner.buf.split_to(min);
@@ -230,9 +221,15 @@ impl Write for Connection {
 
 impl io::Write for &Connection {
     fn poll_write(self: Pin<&mut Self>, cx: &mut Context, buf: &[u8]) -> Poll<io::Result<usize>> {
-        debug!("write");
+        debug!(
+            "connection {} poll write {:?}",
+            self.connection_id,
+            buf.len()
+        );
         let mut send_fut = Box::pin(self.send_data(buf.to_vec()));
-        match send_fut.as_mut().poll(cx) {
+        let r = send_fut.as_mut().poll(cx);
+        debug!("connection {} write resp {:?}", self.connection_id, r);
+        match r {
             Poll::Ready(Ok(_)) => Poll::Ready(Ok(buf.len())),
             Poll::Pending => Poll::Pending,
             Poll::Ready(Err(e)) => panic!("poll write error {:?}", e),
@@ -240,11 +237,13 @@ impl io::Write for &Connection {
     }
 
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context) -> Poll<io::Result<()>> {
+        debug!("connection {} poll flush", self.connection_id);
         // Pin::new(&mut &(*self).stream).poll_flush(cx)
         Poll::Ready(Ok(()))
     }
 
     fn poll_close(self: Pin<&mut Self>, cx: &mut Context) -> Poll<io::Result<()>> {
+        debug!("connection {} poll close", self.connection_id);
         // Pin::new(&mut &(*self).stream).poll_close(cx)
         Poll::Ready(Ok(()))
     }
