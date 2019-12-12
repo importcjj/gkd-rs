@@ -114,7 +114,12 @@ async fn peer_loop_server_side(
         );
         match dispatch.get(&packet.connection_id) {
             Some(ref sender) => {
-                sender.send(packet).await;
+                if !sender.is_full() {
+                    sender.send(packet).await;
+                    debug!("sended to channel");
+                } else {
+                    debug!("packet dropped");
+                }
             }
             None => {
                 debug!("make new connection");
