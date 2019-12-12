@@ -3,6 +3,63 @@ A multi-connection TCP accelerator, written in Rust
 
 为TCP加速而生
 
+
+## Usage
+
+
+echo server
+```rust
+use async_std::io;
+use async_std::task;
+use gkd::Result;
+use gkd::Server;
+
+#[async_std::main]
+async fn main() -> Result<()> {
+    env_logger::init();
+    println!("Listening on :9990");
+    let server = Server::bind("0.0.0.0:9990").await?;
+    while let Some((conn, addr)) = server.accept().await {
+        println!("serve {}", addr);
+        task::spawn(async move {
+            let (r, w) = &mut (&conn, &conn);
+            io::copy(r, w).await.unwrap();
+        });
+    }
+    Ok(())
+}
+
+```
+
+client
+```rust
+use async_std::prelude::*;
+use gkd::Client;
+use gkd::Result;
+#[async_std::main]
+async fn main() -> Result<()> {
+    env_logger::init();
+    let tunnel_num = 4;
+    let client = Client::connect("127.0.0.1:9990", tunnel_num).await?;
+    let mut conn = client.get_connection().await?;
+
+    for i in 1..10u8 {
+        let bytes = [i, i, i];
+        conn.write_all(&bytes).await?;
+    }
+
+    for _i in 1..10u8 {
+        let mut bytes = vec![0; 3];
+        conn.read_exact(&mut bytes).await?;
+        println!("read [{:?}]", bytes);
+    }
+
+    Ok(())
+}
+```
+
+
+
 ## 原理及概念
 
 简单来说，就是原来通过一条Tcp连接收发的数据包现在借助N条Tcp来进行收发，达到提速的效果。
