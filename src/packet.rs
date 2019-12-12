@@ -63,9 +63,9 @@ impl Packet {
 
         let mut packed = vec![];
         packed.push(self.kind as u8);
-        packed.write_u32::<BigEndian>(self.connection_id);
-        packed.write_u32::<BigEndian>(self.packet_id);
-        packed.write_u32::<BigEndian>(self.data_length);
+        packed.write_u32::<BigEndian>(self.connection_id).unwrap();
+        packed.write_u32::<BigEndian>(self.packet_id).unwrap();
+        packed.write_u32::<BigEndian>(self.data_length).unwrap();
 
         if let Some(ref data) = self.data.as_ref() {
             packed.extend_from_slice(data);

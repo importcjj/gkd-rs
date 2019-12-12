@@ -1,7 +1,7 @@
 use crate::packet::{Packet, PacketKind};
+use crate::spawn_and_log_err;
 use crate::Result;
 use async_std::future::Future;
-use crate::spawn_and_log_err;
 use async_std::io;
 use async_std::io::{Read, Write};
 use async_std::net::SocketAddr;
@@ -60,9 +60,9 @@ impl Connection {
         }
     }
 
-    pub(crate) async fn client_side<A: ToSocketAddrs>(
+    pub(crate) async fn client_side(
         connection_id: u32,
-        dest: A,
+        dest: SocketAddr,
         tunnel_recv: Receiver<Packet>,
         tunnel_sender: Sender<Packet>,
     ) -> Result<Self> {
@@ -108,13 +108,11 @@ impl Connection {
             r2 = copy_b.fuse() => r2?
         };
 
-
         Ok(())
     }
 
-    async fn send_connect<A: ToSocketAddrs>(&self, dest: A) -> Result<()> {
-        let addr = dest.to_socket_addrs().await?.next().unwrap();
-        let address = format!("{}", addr);
+    async fn send_connect(&self, dest: SocketAddr) -> Result<()> {
+        let address = format!("{}", dest);
         let send_id = self.sender_id.fetch_add(1, Ordering::Relaxed);
         let connect = Packet::new_connect(send_id, self.connection_id, &address);
 
@@ -128,7 +126,6 @@ impl Connection {
         self.sender.send(data).await;
         Ok(())
     }
-
 }
 
 async fn order_packets(inbound: Receiver<Packet>, ordered: Sender<Packet>) -> Result<()> {

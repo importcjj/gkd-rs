@@ -52,10 +52,7 @@ impl Peer {
         peer
     }
 
-    pub async fn new_client_side_connection<A: ToSocketAddrs>(
-        &self,
-        dest: A,
-    ) -> Result<Connection> {
+    pub async fn new_client_side_connection(&self, dest: SocketAddr) -> Result<Connection> {
         let (send_to_conn, conn_recv) = channel(1024);
         let id = CONNECTION_ID.fetch_add(1, Ordering::Relaxed);
         debug!("make new connection {:?}", id);
