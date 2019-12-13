@@ -1,6 +1,5 @@
 use crate::connection::Connection;
 use crate::peer::{Peer, PeerGroup};
-use crate::spawn_and_log_err;
 use crate::tunnel::Tunnel;
 use crate::Result;
 use async_std::io;
@@ -9,7 +8,7 @@ use async_std::net::TcpStream;
 use async_std::net::{SocketAddr, ToSocketAddrs};
 use async_std::stream::StreamExt;
 use async_std::sync::{channel, Arc, Mutex, Receiver, Sender, Weak};
-
+use async_std::task;
 pub struct Server {
     local_addr: SocketAddr,
     shares: Arc<Mutex<Shares>>,
@@ -40,16 +39,20 @@ impl Server {
         };
 
         let peers = Arc::downgrade(&server.shares);
-        spawn_and_log_err(async move {
+        task::spawn(async move {
             while let Some(stream) = listener.incoming().next().await {
                 log::info!("new tunnel");
-                let stream = stream?;
+                let stream = stream.unwrap();
                 let peers = peers.clone();
 
-                spawn_and_log_err(add_to_peer(peers, stream));
+                task::spawn(async {
+                    if let Err(e) = add_to_peer(peers, stream).await {
+                        log::error!("Failed to add new Tunnel {:?}", e);
+                    };
+                });
             }
 
-            Ok::<(), io::Error>(())
+            log::debug!("Server closed");
         });
 
         Ok(server)
@@ -82,6 +85,13 @@ async fn add_to_peer(shares: Weak<Mutex<Shares>>, stream: TcpStream) -> Result<(
 
     let inbound_sender = peer.inbound_sender.clone();
     let outbound = peer.outbound.clone();
-    spawn_and_log_err(tunnel.run_with_shares(shares, inbound_sender, outbound));
+    task::spawn(async move {
+        let run_tunnel = tunnel.run_with_shares(shares, inbound_sender, outbound);
+        if let Err(e) = run_tunnel.await {
+            log::error!("Tunnel of Peer<{}> failed with {:?}", peer_id, e);
+        };
+
+        log::info!("Tunnel of Peer<{}> closed", peer_id);
+    });
     Ok(())
 }

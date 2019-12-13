@@ -1,10 +1,10 @@
 use crate::connection::Connection;
 use crate::peer::Peer;
-use crate::spawn_and_log_err;
 use crate::tunnel::Tunnel;
 use crate::Result;
 use async_std::net::TcpStream;
 use async_std::net::{SocketAddr, ToSocketAddrs};
+use async_std::task;
 
 pub struct Client {
     local_addr: SocketAddr,
@@ -16,7 +16,7 @@ impl Client {
         let peer_id = 0;
         let peer = Peer::client_side(peer_id);
         let mut local_addr = None;
-        for _i in 0..tunnel_num {
+        for tunnel_id in 0..tunnel_num {
             let stream = TcpStream::connect(&remote).await?;
             if local_addr.is_none() {
                 local_addr = Some(stream.local_addr()?)
@@ -25,7 +25,19 @@ impl Client {
 
             let inbound_sender = peer.inbound_sender.clone();
             let outbound = peer.outbound.clone();
-            spawn_and_log_err(tunnel.run(inbound_sender, outbound));
+            task::spawn(async move {
+                if let Err(e) = tunnel.run(inbound_sender, outbound).await {
+                    log::error!(
+                        "Tunnel<{}> of Peer<{}> failed with {:?}",
+                        tunnel_id,
+                        peer_id,
+                        e
+                    );
+                }
+                log::info!("Tunnel<{}> of Peer<{}> closed", tunnel_id, peer_id);
+            });
+
+            log::info!("Tunnel<{}> of Peer<{}> established", tunnel_id, peer_id);
         }
 
         Ok(Client {

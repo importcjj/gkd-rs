@@ -1,5 +1,4 @@
 use crate::packet::{Packet, PacketKind};
-use crate::spawn_and_log_err;
 use crate::Result;
 use async_std::future::Future;
 use async_std::io;
@@ -95,6 +94,7 @@ impl Connection {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub(crate) async fn connect<A: ToSocketAddrs>(self, dest: A) -> Result<()> {
         let target = TcpStream::connect(dest).await?;
         let (lr, lw) = &mut (&self, &self);
@@ -154,9 +154,8 @@ impl Drop for Connection {
         let send_id = self.sender_id.fetch_add(1, Ordering::Relaxed);
         let disconnect = Packet::new_disconnect(send_id, self.connection_id);
         let sender = self.sender.clone();
-        spawn_and_log_err(async move {
+        task::spawn(async move {
             sender.send(disconnect).await;
-            Ok(())
         });
     }
 }
