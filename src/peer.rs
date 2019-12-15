@@ -65,7 +65,7 @@ impl Peer {
     }
 
     pub async fn new_client_side_connection(&self, dest: SocketAddr) -> Result<Connection> {
-        let (send_to_conn, conn_recv) = channel(1024);
+        let (send_to_conn, conn_recv) = channel(5000);
         let id = CONNECTION_ID.fetch_add(1, Ordering::Relaxed);
         debug!("make new connection {:?}", id);
 
@@ -88,7 +88,7 @@ async fn peer_loop_client_side(
             packet.connection_id, packet.packet_id
         );
         debug!("try to lock the dispatch");
-        let dispatch_guard = dispath.lock().await;
+        let mut dispatch_guard = dispath.lock().await;
         debug!("dispatch locked");
 
         match dispatch_guard.get(&packet.connection_id) {
@@ -100,6 +100,7 @@ async fn peer_loop_client_side(
                     debug!("sended to channel");
                 } else {
                     debug!("packet dropped");
+                    dispatch_guard.remove(&packet.connection_id);
                 }
             }
             None => debug!("nothing to do"),
@@ -124,7 +125,9 @@ async fn peer_loop_server_side(
         );
         match dispatch.get(&packet.connection_id) {
             Some(ref sender) => {
+                debug!("send to channel");
                 sender.send(packet).await;
+                debug!("sended to channel");
             }
             None => {
                 debug!("make new connection");

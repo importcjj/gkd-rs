@@ -74,7 +74,7 @@ async fn inbound<R: Read + Unpin + ?Sized>(
 ) -> Result<()> {
     loop {
         let packet = Packet::from_reader(reader).await?;
-        debug!("new packet {} - {}", packet.connection_id, packet.packet_id);
+        // debug!("new packet {} - {}", packet.connection_id, packet.packet_id);
         inbound_sender.send(packet).await;
     }
 }
@@ -84,7 +84,7 @@ async fn outbound<W: Write + Unpin + ?Sized>(
     mut outbound_receiver: Receiver<Packet>,
 ) -> Result<()> {
     while let Some(mut packet) = outbound_receiver.next().await {
-        debug!("outbound {} - {}", packet.connection_id, packet.packet_id);
+        // debug!("outbound {} - {}", packet.connection_id, packet.packet_id);
         let bytes = packet.pack();
         writer.write_all(bytes).await?;
     }

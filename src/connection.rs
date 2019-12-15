@@ -41,7 +41,7 @@ impl Connection {
         tunnel_sender: Sender<Packet>,
     ) -> Self {
         let (ordered_sender, ordered_recv) = channel(100);
-        task::spawn(order_packets(tunnel_recv, ordered_sender));
+        task::spawn(order_packets(connection_id, tunnel_recv, ordered_sender));
 
         let recv_inner = RecvInner {
             receiver: ordered_recv.clone(),
@@ -128,17 +128,17 @@ impl Connection {
     }
 }
 
-async fn order_packets(inbound: Receiver<Packet>, ordered: Sender<Packet>) -> Result<()> {
+async fn order_packets(connection_id: u32, inbound: Receiver<Packet>, ordered: Sender<Packet>) -> Result<()> {
     let mut recv_id = 0u32;
     let mut packets_caches = HashMap::<u32, Packet>::new();
     while let Some(packet) = inbound.recv().await {
-        debug!("{} come in, {} expected", packet.packet_id, recv_id);
+        // debug!("connection<{}> packet {} come in, {} expected", connection_id, packet.packet_id, recv_id);
         if packet.packet_id == recv_id {
             ordered.send(packet).await;
             recv_id += 1;
 
             while let Some(packet) = packets_caches.remove(&recv_id) {
-                debug!("{} - {} in cache", packet.connection_id, packet.packet_id);
+                // debug!("connection<{}> packet {} in cache",  packet.connection_id, packet.packet_id);
                 ordered.send(packet).await;
                 recv_id += 1;
             }
@@ -146,6 +146,9 @@ async fn order_packets(inbound: Receiver<Packet>, ordered: Sender<Packet>) -> Re
             packets_caches.insert(packet.packet_id, packet);
         }
     }
+
+    debug!("connection<{}> order queue stopped", connection_id);
+    
     Ok(())
 }
 
@@ -196,7 +199,7 @@ impl Read for &Connection {
                 PacketKind::Connect => Poll::Ready(Ok(0)),
                 PacketKind::Data => {
                     let data = packet.data.unwrap();
-                    debug!("poll read size {:?}", data.len());
+                    // debug!("{} poll read size {:?}", self.connection_id, data.len());
                     let min = cmp::min(buf.len(), data.len());
                     inner.buf.extend_from_slice(&data);
 
@@ -204,7 +207,10 @@ impl Read for &Connection {
                     buf.put(data);
                     return Poll::Ready(Ok(min));
                 }
-                PacketKind::Disconnect => Poll::Ready(Ok(0)),
+                PacketKind::Disconnect => {
+                    debug!("{} disconnected", self.connection_id);
+                    Poll::Ready(Ok(0))
+                }
             },
             Poll::Ready(None) => Poll::Ready(Ok(0)),
             Poll::Pending => Poll::Pending,
@@ -228,14 +234,14 @@ impl Write for Connection {
 
 impl io::Write for &Connection {
     fn poll_write(self: Pin<&mut Self>, cx: &mut Context, buf: &[u8]) -> Poll<io::Result<usize>> {
-        debug!(
-            "connection {} poll write {:?}",
-            self.connection_id,
-            buf.len()
-        );
+        // debug!(
+        //     "connection {} poll write {:?}",
+        //     self.connection_id,
+        //     buf.len()
+        // );
         let mut send_fut = Box::pin(self.send_data(buf.to_vec()));
         let r = send_fut.as_mut().poll(cx);
-        debug!("connection {} write resp {:?}", self.connection_id, r);
+        // debug!("connection {} write resp {:?}", self.connection_id, r);
         match r {
             Poll::Ready(Ok(_)) => Poll::Ready(Ok(buf.len())),
             Poll::Pending => Poll::Pending,
