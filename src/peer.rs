@@ -103,7 +103,7 @@ async fn peer_loop_client_side(
                     dispatch_guard.remove(&packet.connection_id);
                 }
             }
-            None => debug!("nothing to do"),
+            None => {debug!("nothing to do");}
         }
         drop(dispatch_guard);
     }
